@@ -34,7 +34,10 @@ class SelfAttention(nn.Module):
 
         attention = torch.softmax(energy / (self.embed_size ** (1 / 2)), dim=3)
 
+        #output is softmax(q*kT/ (k**(1/2)) )V
         output = torch.einsum("nhql,nlhd-->nqhd", [attention, value]).reshape(N, query_len, self.heads*self.head_dim)
-        final_out = self.fc_out(output)
+        out = self.fc_out(output)
+
+        return out
 
 
