@@ -27,7 +27,11 @@ class SelfAttention(nn.Module):
         key = key.reshape(N, key_len, self.heads, self.head_dim)
         query = query.reshape(N, query_len, self.heads, self.head_dim)
         # output of energy should be (N, heads, query_len, key_len)
-        energy = torch.einsum("nqhd, nkhd-->nhqk", [query, key])
+
+        value = self.values(value)
+        key = self.keys(key)
+        query = self.queries(query)
+        energy = torch.einsum("nqhd, nkhd->nhqk", [query, key])
 
         if mask is not None:
             energy = energy.masked_fill(mask == 0, float("-1e20"))
@@ -35,14 +39,14 @@ class SelfAttention(nn.Module):
         attention = torch.softmax(energy / (self.embed_size ** (1 / 2)), dim=3)
 
         #output is softmax(q*kT/ (k**(1/2)) )V
-        output = torch.einsum("nhql,nlhd-->nqhd", [attention, value]).reshape(N, query_len, self.heads*self.head_dim)
+        output = torch.einsum("nhql,nlhd->nqhd", [attention, value]).reshape(N, query_len, self.heads*self.head_dim)
         out = self.fc_out(output)
 
         return out
 
 class TransformerBlock(nn.Module):
     def __init__(self, embed_size, heads, dropout, forward_expansion):
-        super(Tranformer, self).__init__()
+        super(TransformerBlock, self).__init__()
         self.attention = SelfAttention(embed_size, heads)
         self.norm_1 = nn.LayerNorm(embed_size)
         self.norm_2 = nn.LayerNorm(embed_size)
@@ -96,8 +100,10 @@ class Encoder(nn.Module):
 
 class DecoderBlock(nn.Module):
     def __init__(self, embed_size, heads, dropout, forward_expansion):
+        '''
+        O(t-1) -> Masked Self attention --> Self Attention
+        '''
         super(DecoderBlock, self).__init__()
-
         self.masked_attention = SelfAttention(embed_size, heads)
         self.norm = nn.LayerNorm(embed_size)
         self.TransformerBlock = TransformerBlock(embed_size, heads, dropout, forward_expansion)
@@ -128,10 +134,10 @@ class Decoder(nn.Module):
         N, seq_len = x.shape
         positions = torch.arange(0, seq_len).expand(N, seq_len).to(self.device)
 
-        out = self.dropout(self.word_embeddings(x), self.positional_embeddings(positions))
+        out = self.dropout(self.word_embeddings(x) + self.positional_embeddings(positions))
 
         for layer in self.decoder_layers:
-            out = layer(x, encoder_out, encoder_out, src_mask, trg_mask)
+            out = layer(out, encoder_out, encoder_out, src_mask, trg_mask)
 
         out = self.fc_out(out)
         return out
@@ -162,6 +168,8 @@ class Transformer(nn.Module):
         src_mask = self.set_src_mask(src)
         trg_mask = self.set_trg_mask(trg)
         out = self.encoder(src, src_mask)
+        print("Decoder Output")
+        print(out.shape)
         out = self.decoder(trg, out, src_mask, trg_mask)
 
         return out
